@@ -1,0 +1,348 @@
+---
+title: 'Case Study: How Does a Bike-Share Navigate Speedy Success?'
+---
+
+#setup
+
+```{r}
+
+library(tidyverse)
+library(ggplot2)
+library(readr)
+library(tibble)
+library(bigrquery)
+library(dplyr)
+library(DBI)
+
+con <- dbConnect(
+  bigrquery::bigquery(),
+  project = "cyclitics-357505",
+  dataset = "bikeshare",
+  billing = "cyclitics-357505"
+)
+
+getConn <- function() {
+  conn <- dbConnect(
+    bigrquery::bigquery(),
+    project = "cyclitics-357505",
+    dataset = "bikeshare",
+    billing = "cyclitics-357505"
+  ) 
+  conn
+}
+
+```
+
+
+
+### Background of the Company
+
+Cyclistic is a Chicago-based bike share company that offers flexible ridership options like casual and annual member (aka Cyclistic member). Although allowing this flexibility to its users has helped increase the brand awareness among general public and improve their appeal to more broad consumer segment, the recent financial analysis has concluded that annual members are much more profitable than its casual riders. As a result, the company wants to find a way to covert its existing casual riders into annual members.
+
+The director of the company wants me (as a junior analyst) to find out **how annual members and casual riders use Cylistic's bike share service differently**, which will be used to design a new marketing strategy.
+
+### About the data
+
+I was given an access to previous 12 months of Cyclistic's user data (01/07/21 - 01/06/22). This data is publicly available data collected and shared by Motivate International Inc. According to the company website they hold license agreement with City of Chicago, so the data provided is within the company's discretion and they hold the right to modify or cease providing any or all of the Data at any time. In short, the data-privacy issues compel the company to exclude any personally identifiable information about their users.
+
+As a secondary data collected on behalf of City of Chicago, it could be deemed as a reliable data. But as the company stated on their website, the information is shared at their discretion and any private user information is excluded including their demographics that could be otherwise useful to understand user behaviors, I would argue that the data lacks originality and comprehensiveness.
+
+But this also makes data ethical data, which is no doubt very important. Also, it's current data from a known source, so I believe that it should still provide some useful insights that could help the company to attract more long term customer basis.
+
+### Phase 1. The preparation
+
+Upon inspecting the CSV files given to me which was organised monthly, I quickly decided that I will work with Bigquery for data migration and analysis, and R to produce report and visualization.
+
+So, to start off, I initiated Data Transfer on Bigquery, so I can amalgamate them all in one table instead of having a set of 12 files individually uploaded for my task.
+
+It's a big data consisted of 13 columns and 5,797,160 rows with a mix of different types of data. I've named it 'raw_table'.
+
+I have used DBI and BigRQuery to load the data from BigQuery into my R project.
+
+```{r}
+ con <- dbConnect(
+  bigrquery::bigquery(),
+  project = "cyclitics-357505",
+  dataset = "bikeshare",
+  billing = "cyclitics-357505"
+)
+statement <- " select *
+from bikeshare.raw_table"
+conn = getConn()
+df <- dbGetQuery(conn, statement)
+
+print(df)
+```
+
+### Phase 2. Getting to know the data
+
+Upon inspecting the data to understand what I'll be working with, I firstly checked to make sure if there is any NULL values in any of the tables.
+
+I was expecting to see 5,797,160 row in each table, however, it seems that tables like start_station_name and end_station_column including their IDs had some missing values. I wasn't too taken aback by this finding as other tables like 'started_at' don't seem to have any NULLs.
+
+And I was also disappointed to find hat there is no duplicate 'ride_id' i as I was hoping to find out how often users used the service in the last 12 months.
+
+```{r}
+statement <- " select  count(distinct ride_id) as num_ride_id, 
+                       count(rideable_type) as num_rideable_type, 
+                       count(started_at) as num_started_at, 
+                       count(ended_at) as num_ended_at, 
+                       count(start_station_name) as num_start_name, 
+                       count(start_station_id) as num_start_id, 
+                       count(end_station_name) as num_end_name, 
+                       count(end_station_id) as num_end_id, 
+                       count(member_casual) as num_member_casual,
+from bikeshare.raw_table"
+df <- dbGetQuery(con, statement)
+
+print(df)
+```
+
+Here are some data cleaning examples that I've done below. As you can see, 'ride_id', 'rideable_type' , 'member_casual' tables are consistent with their values and structure.
+
+```{r}
+statement <- " select count(distinct rideable_type) as num_rideable_type,
+                      count(distinct member_casual) as num_member_casual,
+                      from bikeshare.raw_table"
+df <- dbGetQuery(con, statement)
+
+print(df)
+```
+
+```{r}
+statement <- " select member_casual,  count(distinct member_casual) as num_member_casual,
+                      from bikeshare.raw_table
+                      group by member_casual"
+
+df <- dbGetQuery(con, statement)
+
+print(df)
+
+```
+
+```{r}
+statement <- " select rideable_type, count(distinct rideable_type) as num_rideable_type,
+                      from bikeshare.raw_table
+                      group by rideable_type"
+
+df <- dbGetQuery(con, statement)
+
+print(df)
+
+```
+
+```{r}
+statement <- " select  length (ride_id) as len_id
+       from bikeshare.raw_table"
+df <- dbGetQuery(con, statement)
+
+print(df)
+
+```
+
+### Phase 3. Let's get digging
+
+Upon data cleaning, I got to work on my data analysis. As acknowledged earlier, there are some missing values in both station names and their matching IDs, but since there is no NULL values in start and end time in each 'ride_id' table, I didn't really think this would compromise my analysis greatly.
+
+And since all personally identifiable data is excluded in the dataset, I really had to think hard about what I should be asking with the given data and how they can be turned into something useful.
+
+There, I started my stare contest with the rows of table and began jotting down a list of questions I want to answer and things that I know so far. These lists turned out very helpful as I would refer back to them every time I had a brain fog after hours of DA and could not seem to remember a thing.
+
+#### Questions I want to answer
+
+-   What's the ratio of annual members and casual members?
+
+-   How long did people use the bike share service on average?
+
+-   What is the most popular day / time for annual members ?
+
+-   What is the most popular day / time for casual members?
+
+-   What is the most preferred bike type for each type of member? 
+
+-   How long does each rider type ride their bike?
+
+-   Number of riders each month?
+
+-   Most popular stations?
+
+#### What I know so far
+
+-   all 'ride_id' is unique (i.e. it's not possible to find out how often riders had used Cyclitics' bike share services in the past 12 months).
+
+-   latitude and longitude data will be excluded from the new table I'll be creating as this data isn't useful to complete my task.
+
+-   Having 'member_casual' data per 'ride_id' is extremely useful to find the ratio of the two ridership types. Additionally, it will also allow me to narrow down riders into a specific group to learn more about them.
+
+-   the datetime data like 'started_at' can be transformed to find duration of each ride and also average out the duration for 'member_casual'
+
+-   as such, 'start_at' data can also be broken into to find the most popular time of the day, month or season, which could potentially provide some ideas about the best time to run a marketing campaign.
+
+-   'start_station_name' including its identification numbers can be aggregated to find the most popular spots for riders to start their bike journey.
+
+-   Finally, although the data set is not complete, the null values won't deter me from drawing on some valuable insights. For instance, of those 13% of null values where both 'start_station_name' and 'start_station_id' are missing, only 6% of riders are found to be casual riders.
+
+```{r}
+statement <- " select start_station_name,
+                      start_station_id,
+                      count(*) as num,
+                    
+                      
+               from bikeshare.raw_table
+               where member_casual = 'member' as member and member_casual='casual' as casual
+             
+               group by start_station_name, start_station_id
+               order by num desc"
+
+
+df <- dbGetQuery(con, statement)
+
+print(df)
+```
+
+```{r}
+statement <- " select end_station_name,
+                      end_station_id,
+                      count(*) as num
+               from bikeshare.raw_table
+              
+               group by end_station_name, end_station_id
+               order by num desc"
+
+
+df <- dbGetQuery(con, statement)
+
+print(df)
+
+
+```
+
+*Finally*, I got to work. I firstly created a temporary table by giving each table a new, clear name for me to work with. Then, I started the data transformation process with 'started_at' table by converting the **timestamp data** into **string data** to allow data aggregation for analysis. I was particularly interested in working with this data type as this could reveal some useful trends like the most popular time of day or week for both groups of riders.
+
+With the current raw data, there was no way in knowing the duration of trip each 'ride_id' made. So I used '**DATETIME_DIFF'** function (which basically subtracts 'started_at' from 'ended_at') to reveal the duration of trip made in minutes. Next I continued to break it into a specific time group like day, time of the day, week, month, and season using **'CASE EXTRACT**' clause.
+
+Then I used **'CASE WHEN**' clause to transform the data into early morning, morning and afternoon, and evening. Here, I conveniently decided to call 1am - 5:59am , 'early morning', 6am to 11:59am, 'morning', 12pm - 17:59pm, 'afternoon', and lastly 18pm to 00:59am, 'evening'.
+
+Since the company is trying to run a marketing campaign targeting its existing casual riders, I believed this data transformation efforts were necessary as this could provide them with some useful marketing leads.
+
+```{r}
+statement <- " select  ride_id, member_casual as member_status, rideable_type as bike_type,   started_at as start_time, ended_at as end_time, 
+start_station_id, start_station_name, end_station_id, end_station_name, datetime_diff(ended_at, started_at, minute) as duration_mins, 
+                       case EXTRACT( dayofweek FROM started_at) when 1 then 'Sunday'
+                            when 2 then 'Monday'
+                            when 3 then 'Tuesday'
+                            when 4 then 'Wednesday'
+                            when 5 then 'Thursday'
+                            when 6 then 'Friday'
+                            when 7 then 'Saturday'
+                            else 'N/A' END as day_of_the_week,
+                       case when extract (hour from started_at) < 6 then 'early morning'
+                            when extract (hour from started_at) = 6 or extract (hour from started_at) < 12 then 'morning'
+                            when extract (hour from started_at) = 12 or extract (hour from started_at) < 18 then 'afternoon'
+                            when extract (hour from started_at) = 18 or extract (hour from started_at) < 25 then 'evening'
+                            else 'N/A' end AS time_of_the_day,
+                        case EXTRACT( month FROM started_at) when 1 then 'January'
+                           when 2 then 'February'
+                           when 3 then 'March'
+                           when 4 then 'April'
+                           when 5 then 'May'
+                           when 6 then 'June'
+                           when 7 then 'July'
+                           when 8 then 'August'
+                           when 9 then 'September'
+                           when 10 then 'October'
+                           when 11 then 'November'
+                           when 12 then 'December'
+                           else 'N/A' END as month,
+                        case EXTRACT( month FROM started_at) when 1 then 'Winter'
+                           when 2 then 'Winter'
+                           when 3 then 'Spring'
+                           when 4 then 'Spring'
+                           when 5 then 'Spring'
+                           when 6 then 'Summer'
+                           when 7 then 'Summer'
+                           when 8 then 'Summer'
+                           when 9 then 'Autumm'
+                           when 10 then 'Autumn'
+                           when 11 then 'Autumn'
+                           when 12 then 'Winter'
+                         else 'N/A' END as season,
+        from bikeshare.raw_table"
+df <- dbGetQuery(con, statement)
+
+print(df)
+```
+
+After completing data transformation, I created a new table and saved it under 'bike_table' and began my data analysis. Firstly, I was curious to find the proportion of rider groups at Cyclitic. For this, I aggregated 'member_status' table using **count (\*)** function on Bigquery. The result showed that just under 44 % of riders were casual riders, whereas just over 56% people made longer term commitment by signing up on the annual membership in the last 12 months. Next, I wanted find out the most popular bike type for both groups. Through data cleansing, I had already discovered that Cyclitic offers three types of bike: Classic, Electric, and Docked. I used the same Count (\*) function for this process and it turns out the classic bike was the most popular type of bike for both groups and the docked bike seemingly the least popular bike type of all.
+
+![](Downloads/Annual%20member%20vs%20Casual%20riders.png)
+
+```{r}
+statement <- " select member_status, count (*) as num
+from bikeshare.bike_table
+group by member_status
+"
+df <- dbGetQuery(con, statement)
+
+print(df)
+```
+
+```{r}
+
+ggplot(data=df) + geom_col(mapping=aes(x=bike_type, y=count, fill=member_status)) + facet_wrap(~member_status) + scale_x_discrete("Bike type") + 
+  labs(title="Bike preference: Casual VS Annual Member", caption = "Data collected by Motivate International Inc") + theme(plot.title = element_text(hjust=0.5))
+
+
+```
+
+And I started working on more complex questions. Since the beginning of this analysis phase, I was interested in working with 'TIMESTAMP' data to find trends. Through data aggregation, I found that the bike share service was most on demand in the afternoon (between 12pm and 6pm) and understandably the early morning (between 1am and 6am) was the least popular time of the day.
+
+```{r}
+statement <- "select member_status, count (*) as num, avg(duration_mins) as avg_duration_mins
+from bikeshare.bike_table
+group by member_status
+order by avg_duration_mins desc"
+df <- dbGetQuery(con, statement)
+
+print(df)
+```
+
+```{r}
+ggplot(dat=df, mapping=aes(x=time_of_the_day, y=num, fill=member_status)) + geom_col() + scale_x_discrete("Time of the day") +
+labs(title="Most popular time of the day", subtitle = "Causual VS Annual member", caption = "Data collected by Motivate International Inc") +
+theme(plot.title = element_text(hjust=0.5), plot.subtitle=element_text(hjust=0.5))
+
+```
+
+Also it was really interesting to note that majority of casual riders were concentrated on the warmer months, notably, most popular season was the Summer and the Autumn, then the number of riders decreased drastically towards the Winter months before it started picking up towards the Spring. In contrast, there appeared to be more even distribution of riders with annual membership throughout the year
+
+```{r}
+df$month = factor(df$month, levels=c('January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'))
+
+ggplot(dat=df) + geom_col(mapping=aes(x=month,y=count, fill= season )) + facet_wrap(~member_status) + labs(title="Most popular time of the year", subtitle = "Casual VS Annual member", caption = "Data collected by Motivate International Inc")+
+  theme(plot.title = element_text(hjust=0.5), plot.subtitle=element_text(hjust=0.5)) + scale_y_continuous(breaks = c(0,100000,200000,300000,400000,450000))
+
+```
+
+Finally, I thought it might be intereting find out the most popular stations among casual riders and see if it reveals a different trend.
+
+As you may remember, the average trip duration for casual riders was around 30 minutes. Interestingly, in turns out the group made a much longer trip in the top 5 start stations, whereas there was no change for annual members.
+
+Unlike annual members who used the bike share services just over 10 minutes on average, casual riders made a much longer trip - well over 50 minutes at 13022 (i.e. Streeter Dr & Grand Ave) as you can below. This location has a bike score of 83 (meaning very bike-able) out of 100, which is measured based on bike lanes and trails, hills, road connectivity and destinations according to 'walkscore.com'.
+
+```{r}
+ggplot(dat=getTop10Summary()) + geom_col(mapping=aes(x=start_station_id, y=num, fill=avg_duration_mins))  + facet_wrap(~member_status) + labs(title="Average trip duration at Top 5 most popular stations",
+ subtitle = "Casual VS Annual member", caption = "Data collected by Motivate International Inc") +theme(plot.title = element_text(hjust=0.5), plot.subtitle=element_text(hjust=0.5)) + scale_x_discrete("Station ID") 
+
+
+```
+
+### **Conclusion**
+
+As part of Google Analytics Course, I was given a case study where I was tasked to work with Chicago based bike share company, Cyclitic who wanted to run a marketing campaign aiming at its current casual riders to increase their annual membership sales. In order to plan their marketing, They asked me to find out how annual members and casual riders use Cylistic's bike share service differently.
+
+For this case study, I prepared and processed the dataset using Bigquery for data cleaning and transforamtion and R Studio and Google Sheet for visualisation. I believe transforming data using datetime data (i.e. 'start_time' table) has helped me discover some useful insights such as most popular time of month, season, as well as, most popular start stations.
+
+The data shows just under 44% of the rides were from casual riders and over 56% for annual members. Annual members had made a longer term commitment with Cyclitic's bike share service by signing up on their annual membership, so I think it is fair to assume that they are likely to be local residents to the Chicago area. However, when it comes to casual riders, since the current data doesn't provide any information that could reveal how frequently the riders had used the service in the last 12 months, it is not possible to know whether they are locals or visitors to the area, which is something that could be further explored if relevant data could be obtained as this could affect the marketing direction.
+
+In conclusion, I believe using the insights gained through this analysis, marketing team could consider running a marketing campaign targeting the most popular stations. In particular, they could use some popular landmarks around the stations to promote its bike share services and the benefits of annual membership. And also they could time their marketing campaign for prior or during Summer periods as it clearly showed to be the most popular time of the year among casual riders. Lastly, it might be worth while to consider introducing a different membership type like 6 monthly membership as this might be more attractive options for casual riders who only want to rider warmer months, but don't see the benefits of paying for a full yearly membership.
